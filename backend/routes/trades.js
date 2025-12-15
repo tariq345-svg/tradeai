@@ -4,7 +4,8 @@ const {
   getTrade,
   createTrade,
   updateTrade,
-  deleteTrade
+  deleteTrade,
+  getTradesForCalendar
 } = require('../controllers/trades');
 const { protect } = require('../middleware/auth');
 
@@ -21,5 +22,14 @@ router.route('/:id')
   .get(getTrade)
   .put(updateTrade)
   .delete(deleteTrade);
+
+// Calendar route
+console.log('Registering /calendar route');
+router.route('/calendar')
+  .get((req, res, next) => {
+    console.log('GET /calendar route hit');
+    console.log('Query params:', req.query);
+    return getTradesForCalendar(req, res, next);
+  });
 
 module.exports = router;

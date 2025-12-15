@@ -2,22 +2,20 @@ import axios from 'axios';
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000/api/v1';
 
+// Create axios instance with default config
 const client = axios.create({
   baseURL: API_BASE_URL,
-  withCredentials: true,
+  withCredentials: true, // This is crucial for sending cookies
   headers: {
     'Content-Type': 'application/json',
     'Accept': 'application/json',
   },
 });
 
-// Add request interceptor to include token
+// Request interceptor
 client.interceptors.request.use(
   (config) => {
-    const token = localStorage.getItem('token');
-    if (token) {
-      config.headers.Authorization = `Bearer ${token}`;
-    }
+    // All requests will automatically include cookies
     return config;
   },
   (error) => {
@@ -25,7 +23,7 @@ client.interceptors.request.use(
   }
 );
 
-// Add response interceptor to handle errors
+// Response interceptor
 client.interceptors.response.use(
   (response) => response,
   async (error) => {
@@ -37,27 +35,50 @@ client.interceptors.response.use(
       
       try {
         // Try to refresh the token
-        const response = await axios.post(`${API_BASE_URL}/auth/refresh-token`, {}, {
-          withCredentials: true
-        });
+        await client.post('/auth/refresh-token');
         
-        const { token } = response.data;
-        localStorage.setItem('token', token);
-        
-        // Retry the original request with new token
-        originalRequest.headers.Authorization = `Bearer ${token}`;
+        // Retry the original request
         return client(originalRequest);
       } catch (error) {
-        // If refresh fails, redirect to login
-        localStorage.removeItem('token');
-        window.location.href = '/login';
+        // If refresh fails, clear any existing auth state
+        if (window.location.pathname !== '/login') {
+          window.location.href = '/login';
+        }
         return Promise.reject(error);
+      }
+    }
+    
+    // If it's a 401 and we've already tried to refresh, or it's another error
+    if (error.response?.status === 401) {
+      if (window.location.pathname !== '/login') {
+        window.location.href = '/login';
       }
     }
     
     return Promise.reject(error);
   }
 );
+
+// Helper function to handle API errors
+const handleApiError = (error) => {
+  if (error.response) {
+    // The request was made and the server responded with a status code
+    // that falls out of the range of 2xx
+    console.error('API Error:', {
+      status: error.response.status,
+      data: error.response.data,
+      headers: error.response.headers,
+    });
+  } else if (error.request) {
+    // The request was made but no response was received
+    console.error('No response received:', error.request);
+  } else {
+    // Something happened in setting up the request that triggered an Error
+    console.error('Request setup error:', error.message);
+  }
+  
+  return Promise.reject(error);
+};
 
 // Auth API
 export const register = async (userData) => {
@@ -73,11 +94,6 @@ export const register = async (userData) => {
 export const login = async (credentials) => {
   try {
     const response = await client.post('/auth/login', credentials);
-    const { token, user } = response.data;
-    if (token) {
-      localStorage.setItem('token', token);
-      localStorage.setItem('user', JSON.stringify(user));
-    }
     return response.data;
   } catch (error) {
     console.error('Login error:', error);
@@ -87,11 +103,12 @@ export const login = async (credentials) => {
 
 export const logout = async () => {
   try {
-    await client.post('/auth/logout');
-  } finally {
-    localStorage.removeItem('token');
-    localStorage.removeItem('user');
+    await client.get('/auth/logout');
+    // Redirect to login page after successful logout
     window.location.href = '/login';
+  } catch (error) {
+    console.error('Logout error:', error);
+    throw error;
   }
 };
 

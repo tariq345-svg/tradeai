@@ -1,7 +1,41 @@
-const User = require('../models/User');
+const jwt = require('jsonwebtoken');
 const ErrorResponse = require('../utils/errorResponse');
 const asyncHandler = require('../middleware/async');
-const jwt = require('jsonwebtoken');
+const User = require('../models/User');
+
+// Get token from model, create cookie and send response
+const sendTokenResponse = (user, statusCode, res) => {
+  // Create token
+  const token = user.getSignedJwtToken();
+
+  const options = {
+    expires: new Date(
+      Date.now() + process.env.JWT_COOKIE_EXPIRE * 24 * 60 * 60 * 1000
+    ),
+    httpOnly: true,
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
+    domain: process.env.NODE_ENV === 'production' ? process.env.COOKIE_DOMAIN : 'localhost',
+    path: '/',
+  };
+
+  // Remove password from output
+  user.password = undefined;
+
+  res
+    .status(statusCode)
+    .cookie('token', token, options)
+    .json({
+      success: true,
+      token,
+      user: {
+        id: user._id,
+        username: user.username,
+        email: user.email,
+        role: user.role
+      }
+    });
+};
 
 // @desc    Register user
 // @route   POST /api/auth/register
@@ -76,30 +110,30 @@ exports.getMe = asyncHandler(async (req, res, next) => {
 });
 
 // Get token from model, create cookie and send response
-const sendTokenResponse = (user, statusCode, res) => {
-  // Create token
-  const token = user.getSignedJwtToken();
+// @desc    Refresh token
+// @route   POST /api/auth/refresh-token
+// @access  Public
+exports.refreshToken = asyncHandler(async (req, res, next) => {
+  const token = req.cookies.token;
 
-  const options = {
-    expires: new Date(
-      Date.now() + process.env.JWT_COOKIE_EXPIRE * 24 * 60 * 60 * 1000
-    ),
-    httpOnly: true,
-    secure: process.env.NODE_ENV === 'production',
-    sameSite: 'lax',
-  };
+  if (!token) {
+    return next(new ErrorResponse('Not authorized to access this route', 401));
+  }
 
-  res
-    .status(statusCode)
-    .cookie('token', token, options)
-    .json({
-      success: true,
-      token,
-      user: {
-        id: user._id,
-        username: user.username,
-        email: user.email,
-        role: user.role,
-      },
-    });
-};
+  try {
+    // Verify token
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+
+    // Get user from the token
+    const user = await User.findById(decoded.id);
+
+    if (!user) {
+      return next(new ErrorResponse('No user found with this id', 404));
+    }
+
+    // Send new token
+    sendTokenResponse(user, 200, res);
+  } catch (err) {
+    return next(new ErrorResponse('Not authorized to access this route', 401));
+  }
+});
